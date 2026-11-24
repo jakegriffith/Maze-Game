@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Find someone.</title>
+  <!-- Laptop / projector screen. Shows a QR code that sends phones to phone.html -->
+  <script type="importmap">
+    { "imports": { "qrcode": "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm" } }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #f5f0e8;
+      font-family: Georgia, 'Times New Roman', serif;
+      color: #111;
+    }
+
+    #display {
+      width: 100%;
+      height: 100%;
+    }
+
+    .display-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8vw;
+      padding: 6vh 6vw;
+      width: 100%;
+      height: 100%;
+    }
+    .display-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4vh;
+      max-width: 40vw;
+    }
+    .display-title {
+      font-size: clamp(2.5rem, 6vw, 6rem);
+      line-height: 1.1;
+      letter-spacing: 0.01em;
+    }
+    .display-body {
+      font-size: clamp(1.1rem, 2vw, 2rem);
+      line-height: 1.6;
+    }
+    .display-url {
+      font-size: clamp(0.9rem, 1.2vw, 1.2rem);
+      color: #555;
+      word-break: break-all;
+    }
+    .display-qr {
+      flex-shrink: 0;
+      width: min(70vh, 42vw);
+      padding: 2vw;
+      border: 1px solid #111;
+    }
+    .display-qr svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    /* Portrait / narrow screens: stack QR under the text */
+    @media (max-aspect-ratio: 1/1) {
+      .display-inner { flex-direction: column; gap: 5vh; text-align: center; }
+      .display-text  { max-width: 90vw; }
+      .display-qr    { width: min(80vw, 55vh); }
+    }
+  </style>
+</head>
+<body>
+  <div id="display"></div>
+  <script type="module" src="src/screens/display.js"></script>
+</body>
+</html>
