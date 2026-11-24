@@ -1,8 +1,20 @@
 import { config } from './config.js'
 import { generateMaze } from './maze.js'
 
-// role: 'solo' | 'a' | 'b'
-// 'a' starts top-left, 'b' starts bottom-right (same as solo goal corner)
+// role: 'solo' | slot number 0–7 (multiplayer start spot)
+// Slots: corners first, then edge midpoints, so up to 8 people start spread out.
+//   0 top-left · 1 bottom-right · 2 top-right · 3 bottom-left
+//   4 top-middle · 5 bottom-middle · 6 left-middle · 7 right-middle
+function slotCell(slot, cols, rows) {
+  const mc = Math.floor(cols / 2)
+  const mr = Math.floor(rows / 2)
+  const cells = [
+    [0, 0], [cols - 1, rows - 1], [cols - 1, 0], [0, rows - 1],
+    [mc, 0], [mc, rows - 1], [0, mr], [cols - 1, mr],
+  ]
+  return cells[slot % cells.length]
+}
+
 export function createGame(mazeCanvas, onWin, role = 'solo') {
   const ctx = mazeCanvas.getContext('2d')
 
@@ -21,9 +33,12 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
   let goalX = 0
   let goalY = 0
 
-  // Partner position in maze coords (multiplayer only), set via setPartnerPosition()
-  let partnerMX = null
-  let partnerMY = null
+  // Other players (multiplayer only), in maze coords: id → { mx, my }
+  let others = {}
+  // Who to draw: ids in my linked cluster, and the linked pairs to join with lines.
+  // 'me' stands for this phone's own ball in pairs.
+  let visible = new Set()
+  let linkLines = []
 
   let won = false
 
@@ -35,21 +50,20 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
     layout()
     velX = 0
     velY = 0
-    partnerMX = null
-    partnerMY = null
+    others = {}
+    visible = new Set()
+    linkLines = []
 
-    if (role === 'b') {
-      // Player B starts bottom-right
-      ballX = cellSize * (cols - 0.5)
-      ballY = cellSize * (rows - 0.5)
-      goalX = cellSize * 0.5
-      goalY = cellSize * 0.5
-    } else {
-      // Player A and solo both start top-left
+    if (role === 'solo') {
+      // Solo: start top-left, goal bottom-right
       ballX = cellSize * 0.5
       ballY = cellSize * 0.5
       goalX = cellSize * (cols - 0.5)
       goalY = cellSize * (rows - 0.5)
+    } else {
+      const [c, r] = slotCell(role, cols, rows)
+      ballX = cellSize * (c + 0.5)
+      ballY = cellSize * (r + 0.5)
     }
   }
 
@@ -207,21 +221,45 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
     drawMaze()
     if (role === 'solo') drawGoal()
 
-    if (config.showPartner && role !== 'solo') drawPartner()
+    if (role !== 'solo') drawLinked()
 
     if (vis > 0) ctx.restore()
 
     drawBall()
   }
 
-  // Partner drawn as a thin hollow ring (only if config.showPartner is on)
-  function drawPartner() {
-    if (partnerMX === null) return
-    ctx.beginPath()
-    ctx.arc(partnerMX * cellSize, partnerMY * cellSize, config.ballRadius, 0, Math.PI * 2)
+  // People you've linked up with: thin hollow rings, joined by thin lines.
+  // Everyone you haven't reached yet stays invisible.
+  function drawLinked() {
+    const pos = (id) => {
+      if (id === 'me') return [ballX, ballY]
+      const o = others[id]
+      return o ? [o.mx * cellSize, o.my * cellSize] : null
+    }
+
     ctx.strokeStyle = config.ink
     ctx.lineWidth = 1
-    ctx.stroke()
+
+    for (const [a, b] of linkLines) {
+      const pa = pos(a)
+      const pb = pos(b)
+      if (!pa || !pb) continue
+      ctx.beginPath()
+      ctx.moveTo(pa[0], pa[1])
+      ctx.lineTo(pb[0], pb[1])
+      ctx.stroke()
+    }
+
+    for (const id of visible) {
+      const p = pos(id)
+      if (!p) continue
+      // Fill with background first so link lines don't show through the ring
+      ctx.beginPath()
+      ctx.arc(p[0], p[1], config.ballRadius, 0, Math.PI * 2)
+      ctx.fillStyle = config.bg
+      ctx.fill()
+      ctx.stroke()
+    }
   }
 
   function drawMaze() {
@@ -318,19 +356,33 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
       return { mx: ballX / cellSize, my: ballY / cellSize }
     },
 
-    // Set partner's position (maze coords) so meeting detection can use it
-    setPartnerPosition(mx, my) {
-      partnerMX = mx
-      partnerMY = my
+    // Other players' positions this round (maze coords): { id: { mx, my } }
+    setOthers(map) {
+      others = map
     },
 
-    // Check if this ball overlaps the partner's ball (maze coords)
-    checkMeeting() {
-      if (partnerMX === null) return false
-      const dx = (ballX / cellSize) - partnerMX
-      const dy = (ballY / cellSize) - partnerMY
+    // Who to draw: ids in my linked cluster + linked pairs ('me' = this ball)
+    setLinked(visibleIds, pairs) {
+      visible = new Set(visibleIds)
+      linkLines = pairs
+    },
+
+    // Ids of other players whose ball is touching mine right now
+    touching() {
       const meetDist = (config.ballRadius * 2) / cellSize
-      return Math.hypot(dx, dy) < meetDist
+      const mx = ballX / cellSize
+      const my = ballY / cellSize
+      return Object.entries(others)
+        .filter(([, o]) => Math.hypot(mx - o.mx, my - o.my) < meetDist)
+        .map(([id]) => id)
+    },
+
+    // Testing aid (phone.html?debug): jump the ball to a maze position
+    teleport(mx, my) {
+      ballX = mx * cellSize
+      ballY = my * cellSize
+      velX = 0
+      velY = 0
     },
 
     get cellSize() { return cellSize },

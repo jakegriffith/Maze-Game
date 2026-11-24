@@ -15,9 +15,11 @@ export const config = {
   // Fog of war (0 = no fog / unlimited)
   visibleRadius: 0,
 
-  // Multiplayer: draw the partner's ball as a hollow ring?
-  // false = you only find them by bumping into them (current design)
-  showPartner: false,
+  // Multiplayer groups
+  // You only see people once you've linked up with them (bumped into them).
+  lastRound: 5,          // the game ends after this round
+  maxGroup: 8,           // groups grow by a pair each round, up to this size
+  mergeWaitSeconds: 60,  // how long a group waits for another to join before carrying on
 
   // Colors (not meant to be tuned live, just centralised)
   bg: '#f5f0e8',

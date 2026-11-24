@@ -66,18 +66,23 @@ function runSolo() {
 // ── MULTIPLAYER MODE ──────────────────────────────────────────────────
 //
 // Phone journey:
-//   entry → waiting → instructions → ROUND 1 → "You found someone."
-//   → Round 2 brief (partner's name) → Ready → waiting for partner
-//   → ROUND 2 → "You found {name}." → Begin again (back to entry)
+//   name → "Waiting for someone." → Round 1 brief → ROUND 1 (pair, anonymous)
+//   → "You found someone." → name reveal → ROUND 2 (pair, may call out)
+//   → "You found Sam." → "Waiting for others to join you." (≤ 60 s)
+//   → Round 3 brief → ROUND 3 (≈4) → … → ROUND 5 (≈8)
+//   → "You found each other." → Begin again
 //
-// At any point after pairing, if the partner's phone drops out the room
-// is deleted and this phone shows "The other person left."
+// Every round: touching someone links you. You only see the people you're
+// linked with. The round ends when everyone is linked into one group.
+// Groups grow by a pair at a time (2 → 4 → 6 → 8); if nobody is ready to
+// join within config.mergeWaitSeconds, the group carries on as it is.
 
 async function runMultiplayer() {
   const { mountEntry }        = await import('./screens/entry.js')
   const { mountWaiting }      = await import('./screens/waiting.js')
   const { mountInstructions } = await import('./screens/instructions.js')
   const { mountRound2 }       = await import('./screens/round2.js')
+  const { mountGroup }        = await import('./screens/group.js')
   const { mountMessage }      = await import('./screens/message.js')
 
   const screen = (id) => document.getElementById(`screen-${id}`)
@@ -116,18 +121,22 @@ async function runMultiplayer() {
   const S = {
     uid: null,
     name: null,
-    role: null,          // 'a' | 'b'
     roomId: null,
-    partnerName: null,
-    seeds: null,         // [round1Seed, round2Seed]
-    phase: 'entry',      // entry | lobby | instructions | round1 | met1 | between
-                         // | ready-wait | round2 | finished | left
-    round: 0,
-    metWritten: 0,       // last round we wrote a "met" flag for
+    room: null,          // latest room snapshot
     unsubRoom: null,
     lobby: null,
+    mySlot: undefined,   // start spot in the current room
+    otherNames: [],      // names of everyone else in the room
+    phase: 'entry',      // entry | signing-in | lobby | joining | intro | ready-wait
+                         // | playing | found | merge-wait | finished | left
+    stage: 0,            // round this phone is on
+    linked: new Set(),   // people I've already written a link with this round
+    foundWritten: 0,
+    mergeKey: null,      // the merge this phone is running as group leader
+    mergeTimers: [],
   }
 
+  const debug = new URLSearchParams(location.search).has('debug')
   const mazeCanvas = document.getElementById('maze-canvas')
   const padCanvas  = document.getElementById('pad-canvas')
   let game  = null
@@ -155,6 +164,7 @@ async function runMultiplayer() {
       if (!S.uid) S.uid = await signIn()
     } catch (err) {
       console.error(err)
+      S.phase = 'entry'
       showMessage({
         label: 'Could not connect.',
         body: 'Check the internet connection.',
@@ -166,7 +176,7 @@ async function runMultiplayer() {
     findPartner()
   }
 
-  // ── Lobby ──────────────────────────────────────────────────────────
+  // ── Round 1 pairing ────────────────────────────────────────────────
 
   async function findPartner() {
     leaveCurrentRoom()
@@ -181,74 +191,137 @@ async function runMultiplayer() {
     })
     showScreen('waiting')
 
-    let match
+    let roomId
     try {
-      match = await lobby.matched
+      roomId = await lobby.matched
     } catch (err) {
       if (S.lobby !== lobby) return
       console.error(err)
       S.lobby = null
-      showMessage({
-        label: 'Could not connect.',
-        button: 'Try again',
-        onButton: findPartner,
-      })
+      showMessage({ label: 'Could not connect.', button: 'Try again', onButton: findPartner })
       return
     }
 
     // Player left the waiting screen while the match was landing
     if (S.lobby !== lobby || S.phase !== 'lobby') {
-      mp.leaveRoom(match.roomId).catch(console.error)
+      mp.leaveRoom(roomId, S.uid).catch(console.error)
       return
     }
     S.lobby = null
-    onPaired(match)
+    enterRoom(roomId)
   }
 
-  function onPaired(match) {
-    S.role        = match.role
-    S.roomId      = match.roomId
-    S.partnerName = match.partnerName
-    S.seeds       = match.seeds
-    S.round       = 0
-    S.metWritten  = 0
-    S.unsubRoom   = mp.watchRoom(S.roomId, onRoom)
+  // ── Rooms ──────────────────────────────────────────────────────────
 
-    S.phase = 'instructions'
-    mountInstructions(screen('instructions'), () => startRound(1))
-    showScreen('instructions')
+  function enterRoom(roomId) {
+    S.roomId = roomId
+    S.room = null
+    S.phase = 'joining'
+    mp.registerPresence(roomId, S.uid).catch(console.error)
+    S.unsubRoom = mp.watchRoom(roomId, onRoom)
   }
 
-  // ── Room updates (fires whenever anything in the room changes) ─────
+  function switchRoom(newRoomId) {
+    leaveCurrentRoom()
+    enterRoom(newRoomId)
+  }
 
+  function leaveCurrentRoom() {
+    stopLoop()
+    S.mergeTimers.forEach(clearTimeout)
+    S.mergeTimers = []
+    S.mergeKey = null
+    if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
+    if (S.roomId) { mp.leaveRoom(S.roomId, S.uid).catch(console.error); S.roomId = null }
+    S.room = null
+    S.stage = 0
+    S.mySlot = undefined
+  }
+
+  // Fires whenever anything in the room changes
   function onRoom(snap) {
+    if (['finished', 'left', 'entry'].includes(S.phase)) return
     const room = snap.val()
-    if (!room || !room.seed1) {
-      if (S.phase !== 'finished') partnerLeft()
+    if (!room) return everyoneLeft()
+    S.room = room
+
+    // This group has merged into a bigger one
+    if (room.next) {
+      if (S.phase === 'merge-wait' || S.phase === 'joining') switchRoom(room.next)
+      return  // anyone still reading "You found…" follows when they tap Continue
+    }
+
+    const players = mp.presentPlayers(room)
+
+    // My record vanished (a brief connection drop) — put it back
+    if (!players[S.uid]) {
+      if (S.mySlot !== undefined) {
+        mp.rejoin(S.roomId, S.uid, { name: S.name, slot: S.mySlot }).catch(console.error)
+      }
+      return
+    }
+    S.mySlot = players[S.uid].slot
+
+    const ids = Object.keys(players)
+    if (ids.length < 2) return everyoneLeft()
+    S.otherNames = ids.filter(id => id !== S.uid).map(id => players[id].name)
+
+    if (S.phase === 'joining') return goIntro(room.stage)
+
+    if (S.phase === 'ready-wait') {
+      const allReady = ids.every(id => players[id].ready === S.stage)
+      if (room.stage === S.stage && allReady) startRound()
       return
     }
 
-    const partner = room.players?.[S.role === 'a' ? 'b' : 'a']
-    if (game && partner && partner.round === S.round) {
-      game.setPartnerPosition(partner.x, partner.y)
+    if (S.phase === 'playing') {
+      if (room.found?.[S.stage]) return onFound()
+      updateLinks(room, players)
+      return
     }
 
-    if (S.phase === 'round1' && room.met1) return onMet(1)
-    if (S.phase === 'round2' && room.met2) return onMet(2)
+    if (S.phase === 'merge-wait' && room.stage > S.stage) return goIntro(room.stage)
 
-    if (S.phase === 'ready-wait') {
-      if (room.status === 'round2') return startRound(2)
-      if (room.players?.a?.ready && room.players?.b?.ready) {
-        mp.writeStatus(S.roomId, 'round2')
-      }
+    if (S.phase === 'found' || S.phase === 'merge-wait') maybeLead(room, players)
+  }
+
+  // ── Round intro + ready ────────────────────────────────────────────
+
+  function goIntro(stage) {
+    stopLoop()
+    S.stage = stage
+    S.phase = 'intro'
+    S.linked = new Set()
+    S.foundWritten = 0
+    const names = S.otherNames
+
+    const onReady = () => {
+      S.phase = 'ready-wait'
+      const label =
+        stage === 1 ? 'Waiting for the other person.' :
+        stage === 2 ? `Waiting for ${names[0]}.` :
+                      'Waiting for everyone.'
+      mountWaiting(screen('waiting'), label, findPartner)
+      showScreen('waiting')
+      mp.writeReady(S.roomId, S.uid, stage)
+    }
+
+    if (stage === 1) {
+      mountInstructions(screen('instructions'), onReady)
+      showScreen('instructions')
+    } else if (stage === 2) {
+      mountRound2(screen('round2'), names[0], onReady)
+      showScreen('round2')
+    } else {
+      mountGroup(screen('group'), stage, names, onReady)
+      showScreen('group')
     }
   }
 
-  // ── Rounds ─────────────────────────────────────────────────────────
+  // ── Playing ────────────────────────────────────────────────────────
 
-  function startRound(n) {
-    S.round = n
-    S.phase = `round${n}`
+  function startRound() {
+    S.phase = 'playing'
 
     if (!input) {
       // One-time setup: direction pad + resize handling
@@ -264,13 +337,41 @@ async function runMultiplayer() {
     sizeGameCanvases(mazeCanvas, padCanvas)
     input.draw()
 
-    // Fresh game each pairing (role may differ); same game object for Round 2
-    if (n === 1 || !game) game = createGame(mazeCanvas, () => {}, S.role)
-    game.start(S.seeds[n - 1])
+    game = createGame(mazeCanvas, () => {}, S.mySlot)
+    game.start(mp.seedFor(S.roomId, S.stage))
+    if (debug) window.__maze = game
 
     hideAllScreens()  // reveals the maze behind the overlays
     keepAwake()
     startLoop()
+    updateLinks(S.room, mp.presentPlayers(S.room))
+  }
+
+  // Positions of everyone else, who I'm linked with, and whether we're done
+  function updateLinks(room, players) {
+    if (!game) return
+    const others = {}
+    for (const [id, p] of Object.entries(players)) {
+      if (id !== S.uid && p.stage === S.stage) others[id] = { mx: p.x, my: p.y }
+    }
+    game.setOthers(others)
+
+    const links = Object.keys(room.links?.[S.stage] || {})
+      .map(key => key.split('__'))
+      .filter(([a, b]) => players[a] && players[b])
+    const cluster = clusterOf(S.uid, links)
+
+    const meOr = (id) => (id === S.uid ? 'me' : id)
+    game.setLinked(
+      [...cluster].filter(id => id !== S.uid),
+      links.filter(([a, b]) => cluster.has(a) && cluster.has(b)).map(([a, b]) => [meOr(a), meOr(b)]),
+    )
+
+    // Everyone is in my linked group → round found (any phone may announce it)
+    if (cluster.size === Object.keys(players).length && S.foundWritten !== S.stage) {
+      S.foundWritten = S.stage
+      mp.writeFound(S.roomId, S.stage)
+    }
   }
 
   function startLoop() {
@@ -292,13 +393,15 @@ async function runMultiplayer() {
       if (ts - posWriteTs > 83) {
         posWriteTs = ts
         const { mx, my } = game.getPosition()
-        mp.writePosition(S.roomId, S.role, S.round, mx, my)
+        mp.writePosition(S.roomId, S.uid, S.stage, mx, my)
       }
 
-      // Touching? Either phone may announce it.
-      if (S.metWritten < S.round && game.checkMeeting()) {
-        S.metWritten = S.round
-        mp.writeMet(S.roomId, S.round)
+      // Touching someone new? Link up.
+      for (const other of game.touching()) {
+        if (!S.linked.has(other)) {
+          S.linked.add(other)
+          mp.writeLink(S.roomId, S.stage, S.uid, other)
+        }
       }
 
       requestAnimationFrame(frame)
@@ -312,68 +415,110 @@ async function runMultiplayer() {
     releaseWake()
   }
 
-  function onMet(n) {
-    stopLoop()
+  // ── End of a round ─────────────────────────────────────────────────
 
-    if (n === 1) {
-      S.phase = 'met1'
+  function onFound() {
+    stopLoop()
+    const k = S.stage
+    const names = S.otherNames
+
+    if (k >= config.lastRound) {
+      S.phase = 'finished'
+      const roomId = S.roomId
+      if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
+      S.roomId = null
+      // Small delay so everyone's phone sees the final "found" first
+      setTimeout(() => mp.leaveRoom(roomId, S.uid).catch(console.error), 2000)
+      const n = names.length + 1
       showMessage({
-        label: 'You found someone.',
-        button: 'Continue',
-        onButton: showRound2Intro,
+        label: 'You found each other.',
+        body: n > 2 ? `All ${n} of you.` : '',
+        button: 'Begin again',
+        onButton: goToEntry,
       })
       return
     }
 
-    // End of Round 2
-    S.phase = 'finished'
-    const roomId = S.roomId
-    if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
-    S.roomId = null
-    // Small delay so the partner's phone sees the final "met" before the room vanishes
-    setTimeout(() => mp.leaveRoom(roomId).catch(console.error), 2000)
+    S.phase = 'found'
+    if (k === 1) mp.advanceStage(S.roomId, 1).catch(console.error)
 
     showMessage({
-      label: `You found ${S.partnerName}.`,
-      button: 'Begin again',
-      onButton: goToEntry,
+      label: k === 1 ? 'You found someone.' :
+             k === 2 ? `You found ${names[0]}.` :
+                       'You found each other.',
+      button: 'Continue',
+      onButton: afterFound,
     })
+    maybeLead(S.room, mp.presentPlayers(S.room))
   }
 
-  function showRound2Intro() {
-    S.phase = 'between'
-    mountRound2(screen('round2'), S.partnerName, () => {
-      S.phase = 'ready-wait'
-      mountWaiting(screen('waiting'), `Waiting for ${S.partnerName}.`)
-      showScreen('waiting')
-      mp.writeReady(S.roomId, S.role)
-    })
-    showScreen('round2')
+  function afterFound() {
+    const room = S.room
+    if (room?.next) return switchRoom(room.next)
+    if (room && room.stage > S.stage) return goIntro(room.stage)
+    S.phase = 'merge-wait'
+    mountWaiting(screen('waiting'),
+      S.stage === 1 ? 'One moment.' : 'Waiting for others to join you.',
+      findPartner)
+    showScreen('waiting')
   }
 
-  // ── Partner dropped out ────────────────────────────────────────────
+  // ── Growing the group (the group's leader does this) ───────────────
 
-  function partnerLeft() {
-    const knowsName = ['between', 'ready-wait', 'round2'].includes(S.phase)
-    const who = knowsName ? S.partnerName : 'The other person'
+  function maybeLead(room, players) {
+    const k = room.stage
+    if (!room.found?.[k] || room.next) return
+    if (k < 2 || k >= config.lastRound) return
+    const leader = Object.keys(players).sort()[0]
+    if (leader !== S.uid) return
+    const key = `${S.roomId}:${k}`
+    if (S.mergeKey === key) return
+    S.mergeKey = key
+    runMerge(S.roomId, room, Object.keys(players).length, k)
+  }
+
+  async function runMerge(roomId, room, size, k) {
+    try {
+      const res = await mp.joinGroups(roomId, size, k, config.maxGroup)
+
+      if (res.partnerRoomId) {
+        // We found a group to join with: build the new, bigger room
+        await mp.createMergedRoom(roomId, room, res.partnerRoomId, res.partnerStage)
+        return
+      }
+
+      // Nobody ready yet — wait, then carry on as we are
+      S.mergeTimers.push(setTimeout(async () => {
+        if (S.roomId !== roomId) return
+        const stillWaiting = await mp.leaveGroups(roomId)
+        if (stillWaiting) {
+          await mp.advanceStage(roomId, k)
+        } else {
+          // Another group claimed us at the last second; give them time to
+          // build the new room, then carry on anyway if it never appears.
+          S.mergeTimers.push(setTimeout(() => {
+            if (S.roomId === roomId && !S.room?.next && S.room?.stage === k) {
+              mp.advanceStage(roomId, k)
+            }
+          }, 15000))
+        }
+      }, config.mergeWaitSeconds * 1000))
+    } catch (err) {
+      console.error(err)
+      S.mergeKey = null
+    }
+  }
+
+  // ── Everyone else dropped out ──────────────────────────────────────
+
+  function everyoneLeft() {
+    const label =
+      S.stage <= 1                                   ? 'The other person left.' :
+      S.stage === 2 && S.otherNames.length === 1     ? `${S.otherNames[0]} left.` :
+                                                       'Everyone else left.'
     leaveCurrentRoom()
     S.phase = 'left'
-    showMessage({
-      label: `${who} left.`,
-      button: 'Find someone new',
-      onButton: findPartner,
-    })
-  }
-
-  function leaveCurrentRoom() {
-    stopLoop()
-    if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
-    if (S.roomId) { mp.leaveRoom(S.roomId).catch(console.error); S.roomId = null }
-    S.role = null
-    S.partnerName = null
-    S.seeds = null
-    S.round = 0
-    S.metWritten = 0
+    showMessage({ label, button: 'Find someone new', onButton: findPartner })
   }
 
   // ── Keep the phone screen from dimming mid-maze (where supported) ──
@@ -389,6 +534,20 @@ async function runMultiplayer() {
   function releaseWake() {
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null }
   }
+}
+
+// Everyone connected to `start` through links (a chain of hands)
+function clusterOf(start, links) {
+  const seen = new Set([start])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const [a, b] of links) {
+      if (seen.has(a) && !seen.has(b)) { seen.add(b); grew = true }
+      if (seen.has(b) && !seen.has(a)) { seen.add(a); grew = true }
+    }
+  }
+  return seen
 }
 
 // ── Canvas sizing (solo + multiplayer) ────────────────────────────────

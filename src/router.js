@@ -3,7 +3,7 @@
 // Calling showScreen() with any name shows that overlay.
 // Calling hideAllScreens() lets #app show through.
 
-const SCREEN_IDS = ['entry', 'waiting', 'instructions', 'round2', 'message']
+const SCREEN_IDS = ['entry', 'waiting', 'instructions', 'round2', 'group', 'message']
 
 export function showScreen(name) {
   for (const id of SCREEN_IDS) {
