@@ -27,7 +27,7 @@ The QR code always points at `phone.html` on whatever site the laptop page is op
 - `TITLE`: the big heading.
 - `LINES`: the sentences that take turns under it, in order. Add, remove or reword them freely.
 - `ROTATE_SECONDS`: how long each line stays up. It changes instantly, with no fade.
-- `CORRIDOR`: how thick the maze-QR walls are. Every width from 0.38 to 0.72 was tested to scan at laptop, projector and "back of the room" sizes; 0.45 looks most like a maze. Phones can't read thinner than about 0.35.
+- `CORRIDOR`: how thick the maze-QR walls are. Every width from 0.38 to 0.72 was tested to scan at laptop, projector and "back of the room" sizes; 0.45 looks most like a maze. Thinner than 0.38 is untested, so check it with a phone first.
 
 The maze QR keeps the three big corner squares and the small alignment square solid (scanners lock onto those) and uses the strongest error correction, so the stylised walls still scan.
 
