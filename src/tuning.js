@@ -37,8 +37,8 @@ export function createTuningPanel(onRebuild) {
 
   wire('sl-grid',    'lbl-grid',    'gridSize',       v => Math.round(v))
   wire('sl-wall',    'lbl-wall',    'wallThickness',  null)
-  wire('sl-ball',    'lbl-ball',    'ballRadius',     null)
-  wire('sl-speed',   'lbl-speed',   'maxSpeed',       null)
+  wire('sl-ball',    'lbl-ball',    'ballSize',       null)
+  wire('sl-speed',   'lbl-speed',   'speed',          null)
   wire('sl-friction','lbl-friction','friction',       null)
 
   // Visible radius: slider max = 800, but we map slider value 800 → 0 (unlimited)

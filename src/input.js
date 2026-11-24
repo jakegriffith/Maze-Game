@@ -17,6 +17,8 @@ export function createPadInput(canvas) {
 
   // Last-drawn pressed state, so we only redraw when it changes
   let drawnState = ''
+  // When set, the pad is replaced by this text and ignores input
+  let disabledText = null
 
   // ── Geometry ───────────────────────────────────────────────────────
 
@@ -63,6 +65,17 @@ export function createPadInput(canvas) {
 
     ctx.fillStyle = config.bg
     ctx.fillRect(0, 0, W, H)
+
+    if (disabledText) {
+      ctx.fillStyle = config.ink
+      ctx.font = '22px Georgia, "Times New Roman", serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      disabledText.split('\n').forEach((line, i, all) => {
+        ctx.fillText(line, cx, cy + (i - (all.length - 1) / 2) * 34)
+      })
+      return
+    }
 
     const h = arm / 2
     // Four arm squares: [direction, centre x, centre y, arrow angle]
@@ -190,16 +203,21 @@ export function createPadInput(canvas) {
   draw()
 
   return {
-    getVelocity() {
+    // Held direction: dx, dy each -1, 0 or 1 (the game applies the speed)
+    getDirection() {
+      if (disabledText) return { dx: 0, dy: 0 }
       const p = pressed()
-      let vx = (p.right ? 1 : 0) - (p.left ? 1 : 0)
-      let vy = (p.down ? 1 : 0) - (p.up ? 1 : 0)
-      const mag = Math.hypot(vx, vy)
-      if (mag === 0) return { vx: 0, vy: 0 }
       return {
-        vx: (vx / mag) * config.maxSpeed,
-        vy: (vy / mag) * config.maxSpeed,
+        dx: (p.right ? 1 : 0) - (p.left ? 1 : 0),
+        dy: (p.down ? 1 : 0) - (p.up ? 1 : 0),
       }
+    },
+
+    // Replace the pad with a line of text (e.g. "You're out."); null restores it
+    setDisabled(text) {
+      disabledText = text || null
+      touches.clear()
+      draw()
     },
 
     // Call after the canvas is resized

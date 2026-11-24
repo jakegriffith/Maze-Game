@@ -2,11 +2,13 @@
 
 ## Project Description
 
-A multiplayer maze game for a digital storytelling class about belonging, moving from disembodiment to embodiment, and from two people to a crowd. People in the same room, each on their own phone, roll a small ball through a shared maze to find each other. Touching links two people; a round ends when everyone in the maze is linked into one group. You only see people you're linked with.
+A multiplayer maze game for a digital storytelling class about belonging, moving from disembodiment to embodiment, from strangers to a group to group-vs-group. People in the same room, each on their own phone, roll a small ball through a shared maze.
 
-- **Round 1 (pair):** anonymous, no talking.
+- **Round 1 (pair):** anonymous, no talking. Find each other (touch).
 - **Round 2 (same pair):** names revealed, may call out loud (not look at screens).
-- **Rounds 3–5:** groups grow by a pair each round, 2 → 4 → 6 → 8 (merge with longest-waiting compatible group; 60 s wait, then carry on as-is). Same rules as Round 2. Ending after Round 5.
+- **Rounds 3–4:** groups grow by a pair, 2 → 4 → 6 (merge with the longest-waiting compatible group; 60 s wait, then carry on as-is). Touching links; the round ends when everyone is linked; you only see your linked cluster.
+- **Round 5: battle.** After R4, groups queue for any other team (60 s, else peaceful ending). Red (claimer) vs Blue, everyone visible in team colours. Collision: higher speed toward the other wins; within `battleTie` both are out. Last team with anyone in wins.
+- The maze grows with player count (`config.mazeSizes`: 2→12, 4→15, 6→18, 12→22). Ball size and speed are in cell units.
 
 Many groups play at once on a rolling basis. Entry is through a QR code on a separate display screen.
 
@@ -15,7 +17,7 @@ Many groups play at once on a rolling basis. Entry is through a QR code on a sep
 - Black on off-white (`#f5f0e8`)
 - Serif font only (Georgia)
 - Thin lines, large type, lots of whitespace
-- No color, no gradients, no shadows, no animation
+- No color (exception: battle team colours `config.red` / `config.blue`, user-requested), no gradients, no shadows, no animation
 - Nothing eases or fades — changes happen instantly, like an e-ink refresh
 - Designed for phone in portrait first
 
@@ -28,7 +30,7 @@ Many groups play at once on a rolling basis. Entry is through a QR code on a sep
 
 ## Current State
 
-Full Round 1–5 growing-groups flow is built and live. Verified end to end with 8 headless-Chrome "phones" against real Firebase (2→4→6→8), plus a player leaving mid-round and the 60 s carry-on. Not yet played on real phones. `phone.html?debug` exposes `window.__maze` (the current game, has `teleport(mx,my)`) for automated tests.
+Rounds 1–4 (growing groups) + Round 5 Red vs Blue battle are built. Verified end to end with 12 headless-Chrome "phones" against real Firebase: groups 2→4→6, grids 12→15→18→22, battle formation, a charge KO, both-out ties, and "Red wins." Not yet played on real phones. `phone.html?debug` exposes `window.__maze` (game: `teleport`, `grid`) and `window.__room()` ({id, uid, room}) for automated tests.
 
 ## Pages (local: `python3 -m http.server 8000`)
 
@@ -41,19 +43,22 @@ Full Round 1–5 growing-groups flow is built and live. Verified end to end with
 ```
 src/
   config.js           — single config object with all tunable values (DO NOT change without tuning)
-                        lastRound 5, maxGroup 8, mergeWaitSeconds 60
+                        ballSize (cell fraction), speed (cells/s), mazeSizes + gridFor(),
+                        lastLinkRound 4, battleRound 5, maxGroup 6, mergeWaitSeconds 60, battleTie, red/blue
   maze.js             — seeded RNG (mulberry32) + recursive backtracker maze generator
   game.js             — canvas rendering, collision detection, game loop
-                        accepts role: 'solo' | slot 0–7 (corners first, then edge midpoints)
-                        exposes getPosition(), setOthers(), setLinked(), touching(), teleport()
-                        draws linked players as hollow rings + 1px link lines
+                        createGame(canvas, onWin, 'solo' | [col,row]); start(seed, grid)
+                        slotCell() (finding rounds), teamCell() (battle start spots)
+                        setDirection(dx,dy), getPosition(), getVelocity() (cells/s),
+                        setOthers(), setScene({balls, lines, me}), touching(), teleport()
   input.js            — D-pad drawn on pad canvas (touch by angle from centre, corners = diagonal,
-                        multi-touch), mouse, arrow keys → velocity at maxSpeed; exposes draw()
+                        multi-touch), mouse, arrow keys → getDirection(); draw(); setDisabled(text)
   tuning.js           — hidden tuning panel (T key or top-right corner tap); solo only
   router.js           — showScreen(name) / hideAllScreens() — toggles fixed overlay divs
   firebase.js         — Firebase init, exports db, auth, signIn()
   firebase-config.js  — Firebase web config (public by design; rules protect data)
-  multiplayer.js      — joinLobby(), joinGroups/leaveGroups/createMergedRoom (merge queue), advanceStage,
+  multiplayer.js      — joinLobby(), joinQueue/leaveQueue ('groups' | 'battles'), createMergedRoom,
+                        createBattleRoom, advanceStage (room transaction, sets grid), endPeacefully, writeOut,
                         presence (player-level onDisconnect), writePosition/Ready/Link/Found, leaveRoom
   main.js             — phone.html entry: ?solo → runSolo(), else → runMultiplayer()
                         runMultiplayer is a phase state machine (S.phase)
@@ -63,7 +68,8 @@ src/
     waiting.js        — mountWaiting(container, label, onCancel?)
     instructions.js   — Round 1 brief instructions
     round2.js         — partner name reveal + Round 2 instructions + Ready
-    group.js          — Rounds 3–5 intro: group names + rules + Ready
+    group.js          — Rounds 3–4 intro: group names + rules + Ready
+    battle.js         — Round 5 intro: team (coloured), teammates, opponent count, rules
     message.js        — generic label/body/button screen (met, ending, partner left, errors)
 database.rules.json   — Firebase rules to paste into the console
 ```
@@ -72,25 +78,32 @@ database.rules.json   — Firebase rules to paste into the console
 
 ```
 /lobby/waiting            ← Round 1 slot; A writes {uid, name, roomId}, B claims it
-/lobby/groups/{roomId}    ← merge queue: {size, stage, since} (under /lobby so existing rules cover it)
+/lobby/groups/{roomId}    ← growth queue: {size, stage, since}
+/lobby/battles/{roomId}   ← battle queue: {size, stage, since}
 /rooms/{roomId}
-  stage                   ← current round 1–5 (advanceStage = transaction k → k+1)
+  stage, grid             ← current round + maze size (advanceStage sets both)
+  mode                    ← 'battle' for the R5 room
   next                    ← merged-into roomId; phones follow it
-  players/{uid}           ← name, slot, x, y, stage, ready (ready = stage number)
-  links/{stage}/{a__b}    ← true when those two touched (sorted uid pair)
-  found/{stage}           ← true when link graph connects all present players
+  ended                   ← 'peace' when no opponent came
+  players/{uid}           ← name, slot, x, y, vx, vy, stage, ready (+ team, teamSize)
+  links/{stage}/{a__b}    ← finding rounds: touched pair
+  found/{stage}           ← finding rounds: link graph connects all present players
+  out/{uid}               ← battle: knocked out
 ```
 
-Maze seed = `${roomId}-${stage}`. Positions in maze cells, tagged with stage; other-stage positions ignored. Present players = nodes with a `name` (stray position writes can leave nameless nodes).
+Maze seed = `${roomId}-${stage}`. Positions and velocities are in cells, tagged with stage. Present players = nodes with a `name`.
 
 ## Matchmaking Design
 
-Round 1: Player B always creates the room (no double-creation race):
-1. A picks a fresh roomId, writes {uid, name, roomId} to `lobby/waiting`, watches `rooms/{roomId}`
-2. B's transaction clears the slot and creates the room with both players
-3. A sees the room with 2 present players → paired; cancels its lobby onDisconnect
+Round 1: Player B always creates the room (no double-creation race).
 
-Merging (after found at stage 2–4): the group leader (lowest present uid) runs one transaction on `lobby/groups`. It either claims the oldest compatible entry (one side is a pair, combined ≤ maxGroup) and builds a new room (stage = max+1, writes `next` to both old rooms), or queues itself. After mergeWaitSeconds the leader dequeues and advances stage in place. If it was claimed at the last second, it waits 15 s for `next`, then advances anyway. A new leader takes over if the leader leaves.
+Between rounds the group leader (lowest present uid) runs one transaction on a queue under /lobby:
+- After R2/R3, `groups` queue: claim the oldest entry where one side is a pair and the total is ≤ maxGroup, then createMergedRoom. Else wait mergeWaitSeconds, then advanceStage in place.
+- After R4, `battles` queue: claim any other team, then createBattleRoom (claimer = red). Else wait, then endPeacefully.
+
+If the leader was claimed at the last second, it waits 15 s for `next`, then carries on anyway. A new leader takes over if the leader leaves.
+
+Battle collisions: the lower uid of a touching red/blue pair judges using its own velocity vs the other's last-written velocity. Each phone ends the battle when a team has no present, not-out players.
 
 ## Notes
 

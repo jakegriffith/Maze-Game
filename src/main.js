@@ -1,5 +1,5 @@
 import { config } from './config.js'
-import { createGame } from './game.js'
+import { createGame, slotCell, teamCell } from './game.js'
 import { createPadInput } from './input.js'
 import { createTuningPanel } from './tuning.js'
 import { showScreen, hideAllScreens } from './router.js'
@@ -45,8 +45,8 @@ function runSolo() {
     if (lastTs === null) lastTs = ts
     const dt = Math.min((ts - lastTs) / 1000, 0.05)
     lastTs = ts
-    const { vx, vy } = input.getVelocity()
-    game.setVelocity(vx, vy)
+    const { dx, dy } = input.getDirection()
+    game.setDirection(dx, dy)
     game.step(dt)
     game.draw()
     requestAnimationFrame(loop)
@@ -69,13 +69,18 @@ function runSolo() {
 //   name → "Waiting for someone." → Round 1 brief → ROUND 1 (pair, anonymous)
 //   → "You found someone." → name reveal → ROUND 2 (pair, may call out)
 //   → "You found Sam." → "Waiting for others to join you." (≤ 60 s)
-//   → Round 3 brief → ROUND 3 (≈4) → … → ROUND 5 (≈8)
-//   → "You found each other." → Begin again
+//   → Round 3 brief → ROUND 3 (≈4) → ROUND 4 (≈6)
+//   → "Waiting for another team." → ROUND 5: BATTLE, Red vs Blue
+//   → "Red wins." / "Blue wins." → Begin again
+//   (no other team within 60 s → "You found each other." instead)
 //
-// Every round: touching someone links you. You only see the people you're
+// Rounds 1–4: touching someone links you. You only see the people you're
 // linked with. The round ends when everyone is linked into one group.
-// Groups grow by a pair at a time (2 → 4 → 6 → 8); if nobody is ready to
-// join within config.mergeWaitSeconds, the group carries on as it is.
+// Groups grow by a pair at a time (2 → 4 → 6); if nobody is ready to join
+// within config.mergeWaitSeconds, the group carries on as it is.
+// Round 5: two teams share one maze; everyone is visible. When Red and
+// Blue touch, whoever was moving harder into the other knocks them out.
+// Last team with anyone left wins. The maze grows with the number of players.
 
 async function runMultiplayer() {
   const { mountEntry }        = await import('./screens/entry.js')
@@ -83,6 +88,7 @@ async function runMultiplayer() {
   const { mountInstructions } = await import('./screens/instructions.js')
   const { mountRound2 }       = await import('./screens/round2.js')
   const { mountGroup }        = await import('./screens/group.js')
+  const { mountBattle }       = await import('./screens/battle.js')
   const { mountMessage }      = await import('./screens/message.js')
 
   const screen = (id) => document.getElementById(`screen-${id}`)
@@ -134,6 +140,10 @@ async function runMultiplayer() {
     foundWritten: 0,
     mergeKey: null,      // the merge this phone is running as group leader
     mergeTimers: [],
+    battle: false,       // this round is the Red vs Blue battle
+    out: false,          // battle: I've been knocked out
+    decided: new Set(),  // battle: collisions I've already judged
+    battlePlayers: {},   // battle: latest player records
   }
 
   const debug = new URLSearchParams(location.search).has('debug')
@@ -275,11 +285,13 @@ async function runMultiplayer() {
     }
 
     if (S.phase === 'playing') {
+      if (S.battle) return updateBattle(room, players)
       if (room.found?.[S.stage]) return onFound()
       updateLinks(room, players)
       return
     }
 
+    if (S.phase === 'merge-wait' && room.ended === 'peace') return peacefulEnding()
     if (S.phase === 'merge-wait' && room.stage > S.stage) return goIntro(room.stage)
 
     if (S.phase === 'found' || S.phase === 'merge-wait') maybeLead(room, players)
@@ -306,7 +318,15 @@ async function runMultiplayer() {
       mp.writeReady(S.roomId, S.uid, stage)
     }
 
-    if (stage === 1) {
+    if (S.room.mode === 'battle') {
+      const players = mp.presentPlayers(S.room)
+      const myTeam = players[S.uid].team
+      const mates = Object.entries(players)
+        .filter(([id, p]) => id !== S.uid && p.team === myTeam).map(([, p]) => p.name)
+      const opponents = Object.values(players).filter(p => p.team !== myTeam).length
+      mountBattle(screen('group'), stage, myTeam, mates, opponents, onReady)
+      showScreen('group')
+    } else if (stage === 1) {
       mountInstructions(screen('instructions'), onReady)
       showScreen('instructions')
     } else if (stage === 2) {
@@ -337,14 +357,30 @@ async function runMultiplayer() {
     sizeGameCanvases(mazeCanvas, padCanvas)
     input.draw()
 
-    game = createGame(mazeCanvas, () => {}, S.mySlot)
-    game.start(mp.seedFor(S.roomId, S.stage))
-    if (debug) window.__maze = game
+    const players = mp.presentPlayers(S.room)
+    const me = players[S.uid]
+    const grid = S.room.grid || config.gridSize
+    S.battle = S.room.mode === 'battle'
+    S.out = false
+    S.decided = new Set()
+    input.setDisabled(null)
+
+    // Start spot: corners/edges in finding rounds; your team's edge in the battle
+    const start = S.battle
+      ? teamCell(me.team, me.slot, me.teamSize, grid)
+      : slotCell(me.slot, grid, grid)
+    game = createGame(mazeCanvas, () => {}, start)
+    game.start(mp.seedFor(S.roomId, S.stage), grid)
+    if (debug) {
+      window.__maze = game
+      window.__room = () => ({ id: S.roomId, uid: S.uid, room: S.room })
+    }
 
     hideAllScreens()  // reveals the maze behind the overlays
     keepAwake()
     startLoop()
-    updateLinks(S.room, mp.presentPlayers(S.room))
+    if (S.battle) updateBattle(S.room, players)
+    else updateLinks(S.room, players)
   }
 
   // Positions of everyone else, who I'm linked with, and whether we're done
@@ -361,16 +397,76 @@ async function runMultiplayer() {
       .filter(([a, b]) => players[a] && players[b])
     const cluster = clusterOf(S.uid, links)
 
+    // Draw only my linked group: thin rings joined by thin lines
     const meOr = (id) => (id === S.uid ? 'me' : id)
-    game.setLinked(
-      [...cluster].filter(id => id !== S.uid),
-      links.filter(([a, b]) => cluster.has(a) && cluster.has(b)).map(([a, b]) => [meOr(a), meOr(b)]),
-    )
+    game.setScene({
+      balls: [...cluster].filter(id => id !== S.uid).map(id => ({ id, filled: false })),
+      lines: links.filter(([a, b]) => cluster.has(a) && cluster.has(b)).map(([a, b]) => [meOr(a), meOr(b)]),
+    })
 
     // Everyone is in my linked group → round found (any phone may announce it)
     if (cluster.size === Object.keys(players).length && S.foundWritten !== S.stage) {
       S.foundWritten = S.stage
       mp.writeFound(S.roomId, S.stage)
+    }
+  }
+
+  // Battle: everyone still in is drawn in their team colour; check for a winner
+  function updateBattle(room, players) {
+    if (!game) return
+    const out = room.out || {}
+    const myTeam = players[S.uid].team
+    S.battlePlayers = players
+
+    if (out[S.uid] && !S.out) {
+      S.out = true
+      input.setDisabled('You\u2019re out.\nWatch your team.')
+    }
+
+    const others = {}
+    const balls = []
+    for (const [id, p] of Object.entries(players)) {
+      if (id === S.uid || out[id] || p.stage !== S.stage) continue
+      others[id] = { mx: p.x, my: p.y }
+      balls.push({ id, color: config[p.team], filled: true })
+    }
+    game.setOthers(others)
+    game.setScene({ balls, me: { color: config[myTeam], ring: true, hidden: S.out } })
+
+    const alive = (team) => Object.entries(players).some(([id, p]) => p.team === team && !out[id])
+    const red = alive('red')
+    const blue = alive('blue')
+    if (!red || !blue) battleOver(red ? 'red' : blue ? 'blue' : null, myTeam)
+  }
+
+  // Battle: when I touch someone from the other team, whoever was moving
+  // harder into the other wins. The lower uid of the two judges, so both
+  // phones never disagree.
+  function judgeCollisions() {
+    if (S.out) return
+    const players = S.battlePlayers
+    const me = players[S.uid]
+    if (!me) return
+    const { mx, my } = game.getPosition()
+    const { vx, vy } = game.getVelocity()
+
+    for (const id of game.touching()) {
+      const p = players[id]
+      if (!p || p.team === me.team || S.decided.has(id) || S.uid > id) continue
+      S.decided.add(id)
+      const dx = p.x - mx
+      const dy = p.y - my
+      const d = Math.hypot(dx, dy) || 1
+      const mine   = (vx * dx + vy * dy) / d                       // my speed toward them
+      const theirs = ((p.vx || 0) * -dx + (p.vy || 0) * -dy) / d    // their speed toward me
+      if (Math.abs(mine - theirs) < config.battleTie) {
+        mp.writeOut(S.roomId, S.uid)
+        mp.writeOut(S.roomId, id)
+      } else if (mine > theirs) {
+        mp.writeOut(S.roomId, id)
+      } else {
+        mp.writeOut(S.roomId, S.uid)
+      }
     }
   }
 
@@ -384,23 +480,28 @@ async function runMultiplayer() {
       const dt = Math.min((ts - lastTs) / 1000, 0.05)
       lastTs = ts
 
-      const { vx, vy } = input.getVelocity()
-      game.setVelocity(vx, vy)
+      const { dx, dy } = input.getDirection()
+      game.setDirection(dx, dy)
       game.step(dt)
       game.draw()
 
-      // Share position ~12 times a second
-      if (ts - posWriteTs > 83) {
+      // Share position + velocity ~12 times a second (not once you're out)
+      if (ts - posWriteTs > 83 && !S.out) {
         posWriteTs = ts
         const { mx, my } = game.getPosition()
-        mp.writePosition(S.roomId, S.uid, S.stage, mx, my)
+        const { vx, vy } = game.getVelocity()
+        mp.writePosition(S.roomId, S.uid, S.stage, mx, my, vx, vy)
       }
 
-      // Touching someone new? Link up.
-      for (const other of game.touching()) {
-        if (!S.linked.has(other)) {
-          S.linked.add(other)
-          mp.writeLink(S.roomId, S.stage, S.uid, other)
+      if (S.battle) {
+        judgeCollisions()
+      } else {
+        // Touching someone new? Link up.
+        for (const other of game.touching()) {
+          if (!S.linked.has(other)) {
+            S.linked.add(other)
+            mp.writeLink(S.roomId, S.stage, S.uid, other)
+          }
         }
       }
 
@@ -422,23 +523,6 @@ async function runMultiplayer() {
     const k = S.stage
     const names = S.otherNames
 
-    if (k >= config.lastRound) {
-      S.phase = 'finished'
-      const roomId = S.roomId
-      if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
-      S.roomId = null
-      // Small delay so everyone's phone sees the final "found" first
-      setTimeout(() => mp.leaveRoom(roomId, S.uid).catch(console.error), 2000)
-      const n = names.length + 1
-      showMessage({
-        label: 'You found each other.',
-        body: n > 2 ? `All ${n} of you.` : '',
-        button: 'Begin again',
-        onButton: goToEntry,
-      })
-      return
-    }
-
     S.phase = 'found'
     if (k === 1) mp.advanceStage(S.roomId, 1).catch(console.error)
 
@@ -455,12 +539,53 @@ async function runMultiplayer() {
   function afterFound() {
     const room = S.room
     if (room?.next) return switchRoom(room.next)
+    if (room?.ended === 'peace') return peacefulEnding()
     if (room && room.stage > S.stage) return goIntro(room.stage)
     S.phase = 'merge-wait'
     mountWaiting(screen('waiting'),
-      S.stage === 1 ? 'One moment.' : 'Waiting for others to join you.',
+      S.stage === 1 ? 'One moment.' :
+      S.stage === config.lastLinkRound ? 'Waiting for another team.' :
+                                         'Waiting for others to join you.',
       findPartner)
     showScreen('waiting')
+  }
+
+  // ── Endings ────────────────────────────────────────────────────────
+
+  // Stop listening, and leave the room a moment later (so everyone's phone
+  // sees the final result before the room disappears)
+  function finishRoom() {
+    stopLoop()
+    S.phase = 'finished'
+    const roomId = S.roomId
+    if (S.unsubRoom) { S.unsubRoom(); S.unsubRoom = null }
+    S.roomId = null
+    if (roomId) setTimeout(() => mp.leaveRoom(roomId, S.uid).catch(console.error), 2000)
+  }
+
+  // No other team arrived: the game ends with the group you found
+  function peacefulEnding() {
+    const n = S.otherNames.length + 1
+    finishRoom()
+    showMessage({
+      label: 'You found each other.',
+      body: n > 2 ? `All ${n} of you.` : '',
+      button: 'Begin again',
+      onButton: goToEntry,
+    })
+  }
+
+  function battleOver(winner, myTeam) {
+    if (S.phase === 'finished') return
+    finishRoom()
+    if (input) input.setDisabled(null)
+    const cap = (t) => (t === 'red' ? 'Red' : 'Blue')
+    showMessage({
+      label: winner ? `${cap(winner)} wins.` : 'No one is left.',
+      body: `You were on ${cap(myTeam)}.`,
+      button: 'Begin again',
+      onButton: goToEntry,
+    })
   }
 
   // ── Growing the group (the group's leader does this) ───────────────
@@ -468,38 +593,45 @@ async function runMultiplayer() {
   function maybeLead(room, players) {
     const k = room.stage
     if (!room.found?.[k] || room.next) return
-    if (k < 2 || k >= config.lastRound) return
+    if (k < 2 || k > config.lastLinkRound || room.ended) return
     const leader = Object.keys(players).sort()[0]
     if (leader !== S.uid) return
     const key = `${S.roomId}:${k}`
     if (S.mergeKey === key) return
     S.mergeKey = key
-    runMerge(S.roomId, room, Object.keys(players).length, k)
+    // After Rounds 2–3: grow by a pair. After Round 4: find a team to battle.
+    const queue = k === config.lastLinkRound ? 'battles' : 'groups'
+    runMerge(queue, S.roomId, room, Object.keys(players).length, k)
   }
 
-  async function runMerge(roomId, room, size, k) {
+  async function runMerge(queue, roomId, room, size, k) {
+    const compatible = queue === 'battles'
+      ? () => true                                                     // any two teams
+      : (a, b) => (a === 2 || b === 2) && a + b <= config.maxGroup     // add a pair, up to 6
+    // If nobody comes: groups carry on as they are; teams end peacefully
+    const carryOn = () => (queue === 'battles' ? mp.endPeacefully(roomId) : mp.advanceStage(roomId, k))
+
     try {
-      const res = await mp.joinGroups(roomId, size, k, config.maxGroup)
+      const res = await mp.joinQueue(queue, roomId, size, k, compatible)
 
       if (res.partnerRoomId) {
-        // We found a group to join with: build the new, bigger room
-        await mp.createMergedRoom(roomId, room, res.partnerRoomId, res.partnerStage)
+        // Found a match: build the new room (bigger group, or the battle)
+        if (queue === 'battles') await mp.createBattleRoom(roomId, room, res.partnerRoomId)
+        else await mp.createMergedRoom(roomId, room, res.partnerRoomId, res.partnerStage)
         return
       }
 
-      // Nobody ready yet — wait, then carry on as we are
+      // Nobody ready yet — wait, then carry on
       S.mergeTimers.push(setTimeout(async () => {
         if (S.roomId !== roomId) return
-        const stillWaiting = await mp.leaveGroups(roomId)
+        const stillWaiting = await mp.leaveQueue(queue, roomId)
         if (stillWaiting) {
-          await mp.advanceStage(roomId, k)
+          await carryOn()
         } else {
-          // Another group claimed us at the last second; give them time to
-          // build the new room, then carry on anyway if it never appears.
+          // Claimed at the last second; give them time to build the new
+          // room, then carry on anyway if it never appears.
           S.mergeTimers.push(setTimeout(() => {
-            if (S.roomId === roomId && !S.room?.next && S.room?.stage === k) {
-              mp.advanceStage(roomId, k)
-            }
+            if (S.roomId === roomId && !S.room?.next && S.room?.stage === k) carryOn()
           }, 15000))
         }
       }, config.mergeWaitSeconds * 1000))

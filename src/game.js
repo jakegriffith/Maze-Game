@@ -1,11 +1,13 @@
 import { config } from './config.js'
 import { generateMaze } from './maze.js'
 
-// role: 'solo' | slot number 0–7 (multiplayer start spot)
-// Slots: corners first, then edge midpoints, so up to 8 people start spread out.
+// ── Start positions ───────────────────────────────────────────────────
+
+// Finding rounds: corners first, then edge midpoints, so up to 8 people
+// start spread out.
 //   0 top-left · 1 bottom-right · 2 top-right · 3 bottom-left
 //   4 top-middle · 5 bottom-middle · 6 left-middle · 7 right-middle
-function slotCell(slot, cols, rows) {
+export function slotCell(slot, cols, rows) {
   const mc = Math.floor(cols / 2)
   const mr = Math.floor(rows / 2)
   const cells = [
@@ -15,6 +17,14 @@ function slotCell(slot, cols, rows) {
   return cells[slot % cells.length]
 }
 
+// Battle: Red spread down the left edge, Blue down the right edge.
+export function teamCell(team, index, teamSize, grid) {
+  const col = team === 'red' ? 0 : grid - 1
+  const row = Math.min(grid - 1, Math.floor(((index + 0.5) * grid) / Math.max(1, teamSize)))
+  return [col, row]
+}
+
+// role: 'solo' | [col, row] start cell (multiplayer)
 export function createGame(mazeCanvas, onWin, role = 'solo') {
   const ctx = mazeCanvas.getContext('2d')
 
@@ -35,24 +45,24 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
 
   // Other players (multiplayer only), in maze coords: id → { mx, my }
   let others = {}
-  // Who to draw: ids in my linked cluster, and the linked pairs to join with lines.
-  // 'me' stands for this phone's own ball in pairs.
-  let visible = new Set()
-  let linkLines = []
+  // What to draw for other players (see setScene)
+  let scene = { balls: [], lines: [], me: {} }
 
   let won = false
 
-  function init(seed) {
+  // Ball radius and speed scale with the cell, so they fit any maze size
+  const radius = () => config.ballSize * cellSize
+
+  function init(seed, grid) {
     won = false
-    cols = config.gridSize
-    rows = config.gridSize
+    cols = grid || config.gridSize
+    rows = cols
     maze = generateMaze(seed, cols, rows)
     layout()
     velX = 0
     velY = 0
     others = {}
-    visible = new Set()
-    linkLines = []
+    scene = { balls: [], lines: [], me: {} }
 
     if (role === 'solo') {
       // Solo: start top-left, goal bottom-right
@@ -61,7 +71,7 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
       goalX = cellSize * (cols - 0.5)
       goalY = cellSize * (rows - 0.5)
     } else {
-      const [c, r] = slotCell(role, cols, rows)
+      const [c, r] = role
       ballX = cellSize * (c + 0.5)
       ballY = cellSize * (r + 0.5)
     }
@@ -69,7 +79,7 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
 
   function layout() {
     const size = mazeCanvas.width  // square canvas
-    cellSize = size / config.gridSize
+    cellSize = size / cols
   }
 
   // ── Collision helpers ──────────────────────────────────────────────
@@ -169,32 +179,33 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
   // ── Game loop ──────────────────────────────────────────────────────
 
   function update(dt) {
-    if (won) return
+    if (won || scene.me.hidden) return
 
-    // Apply friction every frame regardless of input — caller overlays input velocity
+    // Apply friction every frame regardless of input — caller overlays input direction
     velX *= config.friction
     velY *= config.friction
 
     // Sub-step to prevent tunneling at high speeds or low frame rates
-    const steps = Math.ceil((Math.hypot(velX, velY) * dt) / (config.ballRadius * 0.5)) + 1
+    const r = radius()
+    const steps = Math.ceil((Math.hypot(velX, velY) * dt) / (r * 0.5)) + 1
     const subDt = dt / steps
 
     for (let i = 0; i < steps; i++) {
       ballX += velX * subDt
       ballY += velY * subDt
 
-      const result = resolveWalls(ballX, ballY, config.ballRadius)
+      const result = resolveWalls(ballX, ballY, r)
       ballX = result.x
       ballY = result.y
       if (result.hitX) velX = 0
       if (result.hitY) velY = 0
     }
 
-    // Win condition — solo only. Multiplayer meeting is detected externally.
+    // Win condition — solo only. Multiplayer meetings are detected in main.js.
     if (role === 'solo') {
       const dx = ballX - goalX
       const dy = ballY - goalY
-      if (Math.hypot(dx, dy) < config.ballRadius * 2.5) {
+      if (Math.hypot(dx, dy) < r * 2.5) {
         won = true
         onWin()
       }
@@ -220,27 +231,27 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
 
     drawMaze()
     if (role === 'solo') drawGoal()
-
-    if (role !== 'solo') drawLinked()
+    else drawOthers()
 
     if (vis > 0) ctx.restore()
 
     drawBall()
   }
 
-  // People you've linked up with: thin hollow rings, joined by thin lines.
-  // Everyone you haven't reached yet stays invisible.
-  function drawLinked() {
+  // Other players, as described by setScene():
+  //   lines: pairs of ids ('me' = this ball) joined by a thin line
+  //   balls: { id, color, filled } — filled disc, or a thin hollow ring
+  function drawOthers() {
     const pos = (id) => {
       if (id === 'me') return [ballX, ballY]
       const o = others[id]
       return o ? [o.mx * cellSize, o.my * cellSize] : null
     }
+    const r = radius()
 
-    ctx.strokeStyle = config.ink
     ctx.lineWidth = 1
-
-    for (const [a, b] of linkLines) {
+    ctx.strokeStyle = config.ink
+    for (const [a, b] of scene.lines) {
       const pa = pos(a)
       const pb = pos(b)
       if (!pa || !pb) continue
@@ -250,15 +261,21 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
       ctx.stroke()
     }
 
-    for (const id of visible) {
-      const p = pos(id)
+    for (const ball of scene.balls) {
+      const p = pos(ball.id)
       if (!p) continue
-      // Fill with background first so link lines don't show through the ring
       ctx.beginPath()
-      ctx.arc(p[0], p[1], config.ballRadius, 0, Math.PI * 2)
-      ctx.fillStyle = config.bg
-      ctx.fill()
-      ctx.stroke()
+      ctx.arc(p[0], p[1], r, 0, Math.PI * 2)
+      if (ball.filled) {
+        ctx.fillStyle = ball.color || config.ink
+        ctx.fill()
+      } else {
+        // Fill with background first so link lines don't show through the ring
+        ctx.fillStyle = config.bg
+        ctx.fill()
+        ctx.strokeStyle = ball.color || config.ink
+        ctx.stroke()
+      }
     }
   }
 
@@ -300,37 +317,50 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
   }
 
   function drawGoal() {
-    const r = config.ballRadius * 1.4
     ctx.beginPath()
-    ctx.arc(goalX, goalY, r, 0, Math.PI * 2)
+    ctx.arc(goalX, goalY, radius() * 1.4, 0, Math.PI * 2)
     ctx.strokeStyle = config.ink
     ctx.lineWidth = config.wallThickness
     ctx.stroke()
   }
 
+  // My ball: solid (ink, or my team colour). In the battle it also gets a
+  // thin ink ring so I can pick myself out from my teammates.
   function drawBall() {
+    const me = scene.me
+    if (me.hidden) return
+    const r = radius()
     ctx.beginPath()
-    ctx.arc(ballX, ballY, config.ballRadius, 0, Math.PI * 2)
-    ctx.fillStyle = config.ink
+    ctx.arc(ballX, ballY, r, 0, Math.PI * 2)
+    ctx.fillStyle = me.color || config.ink
     ctx.fill()
+    if (me.ring) {
+      ctx.beginPath()
+      ctx.arc(ballX, ballY, r + 3, 0, Math.PI * 2)
+      ctx.strokeStyle = config.ink
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    }
   }
 
   // Public API — main.js drives the loop, calling step() then draw() each frame
   return {
-    start(seed) {
-      init(seed)
+    start(seed, grid) {
+      init(seed, grid)
     },
 
-    restart(seed) {
-      init(seed)
+    restart(seed, grid) {
+      init(seed, grid)
     },
 
-    setVelocity(vx, vy) {
+    // Direction from the pad: (dx, dy) each -1…1. Speed is config.speed cells/s.
+    setDirection(dx, dy) {
       if (won) return
-      const inputMag = Math.hypot(vx, vy)
-      if (inputMag > 1) {
-        velX = vx
-        velY = vy
+      const mag = Math.hypot(dx, dy)
+      if (mag > 0) {
+        const speed = config.speed * cellSize
+        velX = (dx / mag) * speed
+        velY = (dy / mag) * speed
       }
     },
 
@@ -351,9 +381,14 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
       ballY = my * cellSize
     },
 
-    // Returns ball position in maze coordinates (cell units, e.g. 0.5 = center of cell 0)
+    // Ball position in maze coordinates (cell units, e.g. 0.5 = center of cell 0)
     getPosition() {
       return { mx: ballX / cellSize, my: ballY / cellSize }
+    },
+
+    // Ball velocity in cells per second
+    getVelocity() {
+      return { vx: velX / cellSize, vy: velY / cellSize }
     },
 
     // Other players' positions this round (maze coords): { id: { mx, my } }
@@ -361,15 +396,14 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
       others = map
     },
 
-    // Who to draw: ids in my linked cluster + linked pairs ('me' = this ball)
-    setLinked(visibleIds, pairs) {
-      visible = new Set(visibleIds)
-      linkLines = pairs
+    // What to draw: { balls: [{id, color, filled}], lines: [[a, b]], me: {color, ring, hidden} }
+    setScene(next) {
+      scene = { balls: [], lines: [], me: {}, ...next }
     },
 
     // Ids of other players whose ball is touching mine right now
     touching() {
-      const meetDist = (config.ballRadius * 2) / cellSize
+      const meetDist = config.ballSize * 2
       const mx = ballX / cellSize
       const my = ballY / cellSize
       return Object.entries(others)
@@ -386,6 +420,8 @@ export function createGame(mazeCanvas, onWin, role = 'solo') {
     },
 
     get cellSize() { return cellSize },
+
+    get grid() { return cols },
 
     get won() { return won },
   }
