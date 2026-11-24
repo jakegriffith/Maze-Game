@@ -8,12 +8,12 @@ import { config, gridFor } from './config.js'
 // ── Paths ─────────────────────────────────────────────────────────────
 //
 // /lobby/waiting            one slot: the person waiting for a Round 1 partner
-// /lobby/groups/{roomId}    groups waiting to grow after Rounds 2–3
-// /lobby/battles/{roomId}   teams waiting for an opponent after Round 4
+// /lobby/groups/{roomId}    groups waiting to grow after Round 2
+// /lobby/battles/{roomId}   teams waiting for an opponent after Round 3
 // /rooms/{roomId}           one room per group (2–6 people) or battle (up to 12)
 //   stage                   current round (1–5)
 //   grid                    maze size for the current round
-//   mode                    'battle' for the Round 5 battle room
+//   mode                    'battle' for the Round 4 battle room
 //   ended                   'peace' if no opponent ever arrived
 //   out/{uid}               battle: knocked out
 //   next                    set when this group has merged into another room
@@ -146,9 +146,9 @@ export function joinLobby(uid, name) {
 // ── Queues between rounds ─────────────────────────────────────────────
 //
 // Two queues, both under /lobby (so the existing rules cover them):
-//   lobby/groups/{roomId}   groups waiting to grow after Rounds 2–3
-//                           (one side must be a pair; together ≤ maxGroup)
-//   lobby/battles/{roomId}  teams waiting for an opponent after Round 4
+//   lobby/groups/{roomId}   groups waiting to grow after Round 2
+//                           (pair + pair → 4)
+//   lobby/battles/{roomId}  teams waiting for an opponent after Round 3
 //                           (any two teams)
 //
 // A group's leader calls joinQueue(). In one transaction it either claims

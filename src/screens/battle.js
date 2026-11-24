@@ -1,4 +1,4 @@
-// Round 5 brief: the battle. Which team you're on, who's with you, the rules.
+// Round 4 brief: the battle. Which team you're on, who's with you, the rules.
 // onReady() when the player taps Ready.
 
 import { config } from '../config.js'

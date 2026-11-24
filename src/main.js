@@ -69,16 +69,16 @@ function runSolo() {
 //   name → "Waiting for someone." → Round 1 brief → ROUND 1 (pair, anonymous)
 //   → "You found someone." → name reveal → ROUND 2 (pair, may call out)
 //   → "You found Sam." → "Waiting for others to join you." (≤ 60 s)
-//   → Round 3 brief → ROUND 3 (≈4) → ROUND 4 (≈6)
-//   → "Waiting for another team." → ROUND 5: BATTLE, Red vs Blue
+//   → Round 3 brief → ROUND 3 (≈4)
+//   → "Waiting for another team." → ROUND 4: BATTLE, Red vs Blue (4 vs 4)
 //   → "Red wins." / "Blue wins." → Begin again
 //   (no other team within 60 s → "You found each other." instead)
 //
-// Rounds 1–4: touching someone links you. You only see the people you're
+// Rounds 1–3: touching someone links you. You only see the people you're
 // linked with. The round ends when everyone is linked into one group.
-// Groups grow by a pair at a time (2 → 4 → 6); if nobody is ready to join
+// Pairs merge into groups of 4; if nobody is ready to join
 // within config.mergeWaitSeconds, the group carries on as it is.
-// Round 5: two teams share one maze; everyone is visible. When Red and
+// Round 4: two teams share one maze; everyone is visible. When Red and
 // Blue touch, whoever was moving harder into the other knocks them out.
 // Last team with anyone left wins. The maze grows with the number of players.
 

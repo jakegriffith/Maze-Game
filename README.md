@@ -7,10 +7,9 @@ People in the same room scan a QR code on a shared screen. Each gets a maze on t
 - **Round 1 (2 people):** Find your partner. You don't know who they are, you can't see them, and you can't talk.
 - **Round 2 (same 2):** You learn their name and may call out loud (but not look at each other's screens).
 - **Round 3 (4):** Your pair joins another pair. Touching someone **links** you; the round ends when everyone is linked into one group, like a chain of hands. You only see people you've linked with.
-- **Round 4 (6):** A new pair joins your group. Same rules.
-- **Round 5: the battle.** Your group of 6 becomes a team, **Red** or **Blue**, facing another team of 6 in one maze. Everyone can see everyone. When Red and Blue collide, whoever was moving harder into the other wins and the other is out. Last team standing wins.
+- **Round 4: the battle.** Your group of 4 becomes a team, **Red** or **Blue**, facing another group of 4 in one maze. Everyone can see everyone. When Red and Blue collide, whoever was moving harder into the other wins and the other is out. Last team standing wins.
 
-The maze grows as more people share it: 12×12 for 2, 15×15 for 4, 18×18 for 6, 22×22 for the battle. Many groups play at once, on a rolling basis.
+The maze grows as more people share it: 12×12 for 2, 15×15 for 4, 18×18 for the 4-vs-4 battle. A battle needs 8 people; bigger audiences simply run several games side by side. Many groups play at once, on a rolling basis.
 
 ---
 
@@ -36,18 +35,17 @@ The QR code always points at `phone.html` on whatever site the laptop page is op
 6. **"You found someone."** Continue.
 7. **"Their name is Sam."** Round 2 instructions: you may call out to each other, but don't look at each other's screens. Ready → **"Waiting for Sam."**
 8. **Round 2**, then **"You found Sam."** Continue.
-9. **"Waiting for others to join you."** The pair waits for another group to merge with.
+9. **"Waiting for others to join you."** The pair waits for another pair.
 10. **"Round 3. Your group: Sam, Ana, Ben and you."** Everyone starts apart in a new, bigger maze. You can only see someone once you've bumped into them. Call out. Ready → **"Waiting for everyone."**
 11. **The maze.** Your ball is solid. People you've linked with appear as thin hollow rings, joined by thin lines. The round ends when everyone is linked: **"You found each other."**
-12. **Round 4** repeats steps 9–11 with 6 people.
-13. **"Waiting for another team."** Your 6 wait for another team.
-14. **"Round 5. The battle. You are on Red."** It lists your team and how many are on the other side, plus the rules. Ready.
-15. **The battle.** Red starts down the left edge, Blue down the right. Everyone is drawn in their team colour, and your own ball has a thin black ring so you can find it. Hit someone from the other team while moving faster into them than they're moving into you, and they're out. If it's close to even, you're both out. If you're out, the pad becomes **"You're out. Watch your team."**
-16. **"Red wins."** / **"Blue wins."** (or **"No one is left."**), with "You were on Red." Begin again returns to the start.
+12. **"Waiting for another team."** Your 4 wait for another group that has finished Round 3.
+13. **"Round 4. The battle. You are on Red."** It lists your team and how many are on the other side, plus the rules. Ready.
+14. **The battle.** Red starts down the left edge, Blue down the right. Everyone is visible in their team colour, and your own ball has a thin black ring so you can find it. Hit someone from the other team while moving faster into them than they're moving into you, and they're out. If it's close to even, you're both out. If you're out, the pad becomes **"You're out. Watch your team."**
+15. **"Red wins."** / **"Blue wins."** (or **"No one is left."**), with "You were on Red." Begin again returns to the start.
 
-**How groups grow:** after Round 2 or 3, a group joins the longest-waiting compatible group. One of the two must be a pair, and together they can be at most 6 (so 2+2 → 4, 4+2 → 6). A pair that just finished Round 2 can join a bigger group and skip ahead. If nobody is ready within **60 seconds**, the group carries on to the next round as it is.
+**How groups grow:** after Round 2, a pair joins the longest-waiting other pair to make a group of 4. If nobody is ready within **60 seconds**, the pair carries on to Round 3 as a pair.
 
-**How battles form:** after Round 4, a group waits for any other group that has also finished Round 4. Teams don't have to be the same size. The team that arrives second is Red. If no other team arrives within **60 seconds**, the game ends peacefully: **"You found each other. All 6 of you."**
+**How battles form:** after Round 3, a group waits for any other group that has also finished Round 3. Teams don't have to be the same size; a lone pair can battle a 4. The team that arrives second is Red. If no other team arrives within **60 seconds**, the game ends peacefully: **"You found each other. All 4 of you."**
 
 **If someone leaves:** the rest of the group keeps playing, and the round ends when everyone still there is linked. If you're the last one left, you see **"The other person left."**, **"Sam left."** or **"Everyone else left."** and a button to find someone new. Every waiting screen also has a small **Leave** link.
 
@@ -113,13 +111,13 @@ To watch a session live, open the Firebase console → **Realtime Database → D
 
 ```
 /lobby/waiting              one slot: the person waiting for a Round 1 partner
-/lobby/groups/{roomId}      groups waiting to grow after Round 2 or 3: size, stage, since
-/lobby/battles/{roomId}     teams waiting for an opponent after Round 4: size, stage, since
+/lobby/groups/{roomId}      pairs waiting to merge after Round 2: size, stage, since
+/lobby/battles/{roomId}     teams waiting for an opponent after Round 3: size, stage, since
 
 /rooms/{roomId}             one room per group or battle (a fresh id every merge)
-  stage                     current round, 1–5
+  stage                     current round, 1–4
   grid                      maze size for this round
-  mode                      "battle" in the Round 5 room
+  mode                      "battle" in the Round 4 room
   next                      set when this group has moved into a new room
   ended                     "peace" if no other team arrived
   players/{uid}             name, slot, x, y, vx, vy, stage, ready (+ team in the battle)
@@ -139,7 +137,7 @@ index.html              Laptop / projector page (QR code)
 phone.html              Phone page (all game screens + styles)
 database.rules.json     Firebase security rules (copy into the console)
 src/
-  main.js               Phone: decides solo vs multiplayer, runs the whole Round 1–5 journey + battle
+  main.js               Phone: decides solo vs multiplayer, runs the whole Round 1–4 journey incl. the battle
   config.js             Every tunable number (maze size, ball speed, group sizes, wait time…)
   maze.js               Generates a maze from a seed, so both phones get the same one
   game.js               Draws the maze and balls (linked rings / team colours); walls and movement
@@ -155,8 +153,8 @@ src/
     waiting.js          "Waiting for someone." / "Waiting for Sam."
     instructions.js     Round 1 instructions
     round2.js           Partner's name + Round 2 instructions + Ready
-    group.js            Rounds 3–4: who's in your group + instructions + Ready
-    battle.js           Round 5: your team, the rules + Ready
+    group.js            Round 3: who's in your group + instructions + Ready
+    battle.js           Round 4: your team, the rules + Ready
     message.js          "You found someone.", the ending, "…left.", errors
 ```
 
@@ -166,16 +164,16 @@ src/
 
 **Built and checked**
 - Laptop QR page, phone game and solo demo, all running with no build step
-- Rounds 1–4 with groups growing 2 → 4 → 6, and mazes growing 12 → 15 → 18
-- Round 5 battle, Red vs Blue on a 22×22 maze: tested end to end with 12 simulated phones against the real Firebase. A charging Red knocked out a still Blue; equal hits knocked out both; "Red wins." appeared on every phone.
+- Rounds 1–3 with pairs merging into groups of 4, mazes growing 12 → 15
+- Round 4 battle, 4 vs 4 on an 18×18 maze: tested end to end with 8 simulated phones against the real Firebase. A charging Red knocked out a still Blue; equal hits knocked out both; "Red wins." appeared on every phone.
 - A player leaving mid-round (the rest carry on), and the 60-second carry-on when no group arrives
 
 ### What's Left
 
-1. **Play it with real phones:** 2, then 4, then a room of 12 for the battle.
+1. **Play it with real phones:** 2, then 4, then 8 for a battle.
 2. **Artistic decisions:**
    - Wording of every screen, especially the battle and its ending.
-   - Maze sizes. A 22×22 maze on a phone is dense, with small balls. Change `mazeSizes` in `src/config.js` if it's too much.
+   - Maze sizes (`mazeSizes` in `src/config.js`).
    - Is 60 seconds the right wait for another group or team (`mergeWaitSeconds`)?
    - Team colours (`red`, `blue` in `src/config.js`).
 3. **Optional:** a live line on the laptop screen, such as "Someone is waiting." or how many groups are playing.
@@ -184,5 +182,5 @@ src/
 - If a phone locks or switches apps mid-game, its connection may drop. The group carries on without them, and the phone rejoins if it reconnects in time. Ask players to keep the game open.
 - With an odd number of players, one person waits until someone new scans.
 - Many groups can play at once, each in its own private maze. Firebase's free plan allows 100 phones connected at once.
-- A battle needs two groups to finish Round 4 within about a minute of each other. Starting people in waves helps.
+- A battle needs two groups to finish Round 3 within about a minute of each other. Starting people in waves of about 8 helps.
 - After publishing an update, wait about 10 minutes (or refresh each phone) before playing. Phones can hold on to old files for a few minutes.

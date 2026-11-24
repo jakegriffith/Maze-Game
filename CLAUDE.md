@@ -6,9 +6,9 @@ A multiplayer maze game for a digital storytelling class about belonging, moving
 
 - **Round 1 (pair):** anonymous, no talking. Find each other (touch).
 - **Round 2 (same pair):** names revealed, may call out loud (not look at screens).
-- **Rounds 3–4:** groups grow by a pair, 2 → 4 → 6 (merge with the longest-waiting compatible group; 60 s wait, then carry on as-is). Touching links; the round ends when everyone is linked; you only see your linked cluster.
-- **Round 5: battle.** After R4, groups queue for any other team (60 s, else peaceful ending). Red (claimer) vs Blue, everyone visible in team colours. Collision: higher speed toward the other wins; within `battleTie` both are out. Last team with anyone in wins.
-- The maze grows with player count (`config.mazeSizes`: 2→12, 4→15, 6→18, 12→22). Ball size and speed are in cell units.
+- **Round 3:** pairs merge into groups of 4 (longest-waiting pair; 60 s wait, then carry on as a pair). Touching links; the round ends when everyone is linked; you only see your linked cluster.
+- **Round 4: battle, 4 vs 4.** After R3, groups queue for any other team (60 s, else peaceful ending). Red (claimer) vs Blue, everyone visible in team colours. Collision: higher speed toward the other wins; within `battleTie` both are out. Last team with anyone in wins.
+- The maze grows with player count (`config.mazeSizes`: 2→12, 4→15, 8→18, 12→22). Ball size and speed are in cell units.
 
 Many groups play at once on a rolling basis. Entry is through a QR code on a separate display screen.
 
@@ -30,7 +30,7 @@ Many groups play at once on a rolling basis. Entry is through a QR code on a sep
 
 ## Current State
 
-Rounds 1–4 (growing groups) + Round 5 Red vs Blue battle are built. Verified end to end with 12 headless-Chrome "phones" against real Firebase: groups 2→4→6, grids 12→15→18→22, battle formation, a charge KO, both-out ties, and "Red wins." Not yet played on real phones. `phone.html?debug` exposes `window.__maze` (game: `teleport`, `grid`) and `window.__room()` ({id, uid, room}) for automated tests.
+Rounds 1–3 (pairs → groups of 4) + Round 4 Red vs Blue battle (4 vs 4) are built. Verified end to end with 8 headless-Chrome "phones" against real Firebase: groups 2→4, grids 12→15→18, battle formation, a charge KO, both-out ties, and "Red wins." Not yet played on real phones. `phone.html?debug` exposes `window.__maze` (game: `teleport`, `grid`) and `window.__room()` ({id, uid, room}) for automated tests.
 
 ## Pages (local: `python3 -m http.server 8000`)
 
@@ -44,7 +44,7 @@ Rounds 1–4 (growing groups) + Round 5 Red vs Blue battle are built. Verified e
 src/
   config.js           — single config object with all tunable values (DO NOT change without tuning)
                         ballSize (cell fraction), speed (cells/s), mazeSizes + gridFor(),
-                        lastLinkRound 4, battleRound 5, maxGroup 6, mergeWaitSeconds 60, battleTie, red/blue
+                        lastLinkRound 3, battleRound 4, maxGroup 4, mergeWaitSeconds 60, battleTie, red/blue
   maze.js             — seeded RNG (mulberry32) + recursive backtracker maze generator
   game.js             — canvas rendering, collision detection, game loop
                         createGame(canvas, onWin, 'solo' | [col,row]); start(seed, grid)
@@ -68,8 +68,8 @@ src/
     waiting.js        — mountWaiting(container, label, onCancel?)
     instructions.js   — Round 1 brief instructions
     round2.js         — partner name reveal + Round 2 instructions + Ready
-    group.js          — Rounds 3–4 intro: group names + rules + Ready
-    battle.js         — Round 5 intro: team (coloured), teammates, opponent count, rules
+    group.js          — Round 3 intro: group names + rules + Ready
+    battle.js         — Round 4 intro: team (coloured), teammates, opponent count, rules
     message.js        — generic label/body/button screen (met, ending, partner left, errors)
 database.rules.json   — Firebase rules to paste into the console
 ```
@@ -82,7 +82,7 @@ database.rules.json   — Firebase rules to paste into the console
 /lobby/battles/{roomId}   ← battle queue: {size, stage, since}
 /rooms/{roomId}
   stage, grid             ← current round + maze size (advanceStage sets both)
-  mode                    ← 'battle' for the R5 room
+  mode                    ← 'battle' for the R4 room
   next                    ← merged-into roomId; phones follow it
   ended                   ← 'peace' when no opponent came
   players/{uid}           ← name, slot, x, y, vx, vy, stage, ready (+ team, teamSize)
@@ -98,8 +98,8 @@ Maze seed = `${roomId}-${stage}`. Positions and velocities are in cells, tagged 
 Round 1: Player B always creates the room (no double-creation race).
 
 Between rounds the group leader (lowest present uid) runs one transaction on a queue under /lobby:
-- After R2/R3, `groups` queue: claim the oldest entry where one side is a pair and the total is ≤ maxGroup, then createMergedRoom. Else wait mergeWaitSeconds, then advanceStage in place.
-- After R4, `battles` queue: claim any other team, then createBattleRoom (claimer = red). Else wait, then endPeacefully.
+- After R2, `groups` queue: claim the oldest entry where one side is a pair and the total is ≤ maxGroup, then createMergedRoom. Else wait mergeWaitSeconds, then advanceStage in place.
+- After R3 (lastLinkRound), `battles` queue: claim any other team, then createBattleRoom (claimer = red). Else wait, then endPeacefully.
 
 If the leader was claimed at the last second, it waits 15 s for `next`, then carries on anyway. A new leader takes over if the leader leaves.
 

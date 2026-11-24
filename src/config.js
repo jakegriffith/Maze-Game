@@ -15,19 +15,20 @@ export const config = {
   // Multiplayer: the maze grows as more people share it.
   // [up to this many players, cells per side]
   mazeSizes: [
-    [2, 12],
-    [4, 15],
-    [6, 18],
-    [12, 22],
+    [2, 12],   // a pair
+    [4, 15],   // a group of 4
+    [8, 18],   // a battle, 4 vs 4
+    [12, 22],  // bigger battles (if teams ever arrive larger)
   ],
 
   // Multiplayer rounds
-  //   1–2: pair · 3: group of 4 · 4: group of 6 (find each other)
-  //   5: battle — your team vs another team, Red vs Blue
+  //   1–2: pair · 3: group of 4 (find each other)
+  //   4: battle — your group of 4 vs another group, Red vs Blue
   // In finding rounds you only see people once you've bumped into them.
-  lastLinkRound: 4,      // last "find each other" round
-  battleRound: 5,        // the battle
-  maxGroup: 6,           // groups grow by a pair each round, up to this size
+  // In the battle everyone can see everyone.
+  lastLinkRound: 3,      // last "find each other" round
+  battleRound: 4,        // the battle
+  maxGroup: 4,           // groups grow by a pair, up to this size
   mergeWaitSeconds: 60,  // how long to wait for another group / team before carrying on
   battleTie: 0.5,        // cells/s: if both hit this close in speed, both are out
 
