@@ -15,9 +15,9 @@ Many pairs can play at once, on a rolling basis.
 
 | File | Address | Who sees it |
 |---|---|---|
-| `index.html` | `yourname.github.io/maze-game/` | The laptop or projector: "Find someone." and a large QR code. Leave it up all session. |
-| `phone.html` | `yourname.github.io/maze-game/phone.html` | Players' phones. The QR code sends people here. |
-| `phone.html?solo` | `yourname.github.io/maze-game/phone.html?solo` | You, while tuning: one player alone with a goal and a hidden tuning panel (press `T` or tap the top-right corner). |
+| `index.html` | `jakegriffith.github.io/maze-game/` | The laptop or projector: "Find someone." and a large QR code. Leave it up all session. |
+| `phone.html` | `jakegriffith.github.io/maze-game/phone.html` | Players' phones. The QR code sends people here. |
+| `phone.html?solo` | `jakegriffith.github.io/maze-game/phone.html?solo` | You, while tuning: one player alone with a goal and a hidden tuning panel (press `T` or tap the top-right corner). |
 
 The QR code always points at `phone.html` on whatever site the laptop page is open on, so it never needs updating.
 
@@ -52,15 +52,17 @@ Like a Kindle: black on off-white (`#f5f0e8`), Georgia serif only, thin lines, l
 
 There's no build step. GitHub Pages serves the files exactly as they are, for free, with nothing added to the page. (Netlify started putting a "Powered by Netlify" badge on new free sites in August 2026, and it covered the direction pad, so we moved.)
 
-**First time:**
-1. On [github.com](https://github.com), click **New repository**. Name it `maze-game`, choose **Public**, and click **Create repository**.
-2. On the empty repository page, click **uploading an existing file**.
-3. In Finder, open the **Maze Game** folder and press **Cmd + A** to select everything inside it. Drag the selected items onto the GitHub page. Drag the contents, not the folder itself.
-4. Wait for the files to finish uploading, then click **Commit changes**.
-5. Go to the repository's **Settings** tab, then **Pages** in the left menu. Under "Build and deployment", set Source to **Deploy from a branch**, Branch to **main**, folder to **/(root)**, then click **Save**.
-6. After a minute or two, the site is live at `https://yourname.github.io/maze-game/` (with your GitHub username).
+Live at **https://jakegriffith.github.io/maze-game/** (repository: [github.com/jakegriffith/maze-game](https://github.com/jakegriffith/maze-game)).
 
-**After changes:** in the repository, click **Add file → Upload files**, drag the changed files or folders (for example the `src` folder) onto the page, and click **Commit changes**. Files with the same name are replaced. The site updates within a minute or two at the same address.
+Claude publishes changes automatically: after each change it saves a new version to GitHub (`git commit` + `git push`), and the site updates within a minute or two. Every past version is kept on GitHub.
+
+To publish by hand from Terminal:
+```
+cd ~/Desktop/"Maze Game"
+git add -A
+git commit -m "What changed"
+git push
+```
 
 ---
 
