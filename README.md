@@ -17,11 +17,19 @@ The maze grows as more people share it: 12×12 for 2, 15×15 for 4, 18×18 for t
 
 | File | Address | Who sees it |
 |---|---|---|
-| `index.html` | `jakegriffith.github.io/maze-game/` | The laptop or projector: "Find someone." and a large QR code. Leave it up all session. |
+| `index.html` | `jakegriffith.github.io/maze-game/` | The laptop or projector: "Find someone.", a line that changes every 20 seconds, and a QR code drawn as a maze. Leave it up all session. |
 | `phone.html` | `jakegriffith.github.io/maze-game/phone.html` | Players' phones. The QR code sends people here. |
 | `phone.html?solo` | `jakegriffith.github.io/maze-game/phone.html?solo` | You, while tuning: one player alone with a goal and a hidden tuning panel (press `T` or tap the top-right corner). |
 
 The QR code always points at `phone.html` on whatever site the laptop page is open on, so it never needs updating.
+
+**Editing the laptop page** (all at the top of `src/screens/display.js`):
+- `TITLE`: the big heading.
+- `LINES`: the sentences that take turns under it, in order. Add, remove or reword them freely.
+- `ROTATE_SECONDS`: how long each line stays up. It changes instantly, with no fade.
+- `CORRIDOR`: how thick the maze-QR walls are. Every width from 0.38 to 0.72 was tested to scan at laptop, projector and "back of the room" sizes; 0.45 looks most like a maze. Phones can't read thinner than about 0.35.
+
+The maze QR keeps the three big corner squares and the small alignment square solid (scanners lock onto those) and uses the strongest error correction, so the stylised walls still scan.
 
 ---
 
