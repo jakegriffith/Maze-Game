@@ -17,9 +17,9 @@ The maze grows as more people share it: 12×12 for 2, 15×15 for 4, 18×18 for t
 
 | File | Address | Who sees it |
 |---|---|---|
-| `index.html` | `jakegriffith.github.io/maze-game/` | The laptop or projector: "Find someone.", a line that changes every 20 seconds, and a QR code drawn as a maze. Leave it up all session. |
-| `phone.html` | `jakegriffith.github.io/maze-game/phone.html` | Players' phones. The QR code sends people here. |
-| `phone.html?solo` | `jakegriffith.github.io/maze-game/phone.html?solo` | You, while tuning: one player alone with a goal and a hidden tuning panel (press `T` or tap the top-right corner). |
+| `index.html` | `jakegriffith.github.io/Maze-Game/` | The laptop or projector: "Find someone.", a line that changes every 20 seconds, and a QR code drawn as a maze. Leave it up all session. |
+| `phone.html` | `jakegriffith.github.io/Maze-Game/phone.html` | Players' phones. The QR code sends people here. |
+| `phone.html?solo` | `jakegriffith.github.io/Maze-Game/phone.html?solo` | You, while tuning: one player alone with a goal and a hidden tuning panel (press `T` or tap the top-right corner). |
 
 The QR code always points at `phone.html` on whatever site the laptop page is open on, so it never needs updating.
 
@@ -71,7 +71,7 @@ Like a Kindle: black on off-white (`#f5f0e8`), Georgia serif only, thin lines, l
 
 There's no build step. GitHub Pages serves the files exactly as they are, for free, with nothing added to the page. (Netlify started putting a "Powered by Netlify" badge on new free sites in August 2026, and it covered the direction pad, so we moved.)
 
-Live at **https://jakegriffith.github.io/maze-game/** (repository: [github.com/jakegriffith/maze-game](https://github.com/jakegriffith/maze-game)).
+Live at **https://jakegriffith.github.io/Maze-Game/** (repository: [github.com/jakegriffith/Maze-Game](https://github.com/jakegriffith/Maze-Game)).
 
 Claude publishes changes automatically: after each change it saves a new version to GitHub (`git commit` + `git push`), and the site updates within a minute or two. Every past version is kept on GitHub.
 

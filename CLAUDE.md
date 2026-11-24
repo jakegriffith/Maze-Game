@@ -25,7 +25,7 @@ Many groups play at once on a rolling basis. Entry is through a QR code on a sep
 
 - **Frontend:** Plain JavaScript ES modules, **no build step** (no Vite/npm). External libs via `<script type="importmap">` in each HTML file: Firebase 13.4.0 from gstatic, `qrcode@1.5.4` from jsdelivr `+esm`. User deploys by drag-and-drop upload to a GitHub repo served by GitHub Pages (no build).
 - **Sync:** Firebase Realtime Database + anonymous auth
-- **Hosting:** GitHub Pages — repo https://github.com/jakegriffith/maze-game (public), deploy from branch main /root, live at https://jakegriffith.github.io/maze-game/. **Workflow: after every change, commit and `git push` (user's standing request); site updates in ~1 min.** Push uses the saved macOS keychain login (no gh CLI installed). Moved off Netlify Nov 2026: Netlify's free-plan "Powered by Netlify" badge covered the D-pad. All paths must stay relative (site lives under /maze-game/).
+- **Hosting:** GitHub Pages — repo https://github.com/jakegriffith/Maze-Game (public), deploy from branch main /root, live at https://jakegriffith.github.io/Maze-Game/. **Workflow: after every change, commit and `git push` (user's standing request); site updates in ~1 min.** Push uses the saved macOS keychain login (no gh CLI installed). Moved off Netlify Nov 2026: Netlify's free-plan "Powered by Netlify" badge covered the D-pad. All paths must stay relative (site lives under /Maze-Game/ — path is case-sensitive).
 - **Entry:** QR code on a separate display screen
 
 ## Current State
